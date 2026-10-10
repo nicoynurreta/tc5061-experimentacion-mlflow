@@ -1,0 +1,14 @@
+# salidas de MLflow y del script
+mlruns/
+mlartifacts/
+salidas/
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# entornos virtuales
+venv/
+.venv/
+vmlops/
