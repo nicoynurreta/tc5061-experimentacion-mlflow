@@ -173,8 +173,10 @@ def main():
         with tempfile.TemporaryDirectory() as carpeta:
             for ruta in guardar_artefactos(matriz, metricas, carpeta):
                 mlflow.log_artifact(ruta)
+        # los árboles del bosque usan un tipo que skops no carga si no se declara confiable
         firma = infer_signature(X_prueba, modelo.predict(X_prueba))
-        mlflow.sklearn.log_model(modelo, name="modelo", signature=firma, input_example=X_prueba.head())
+        mlflow.sklearn.log_model(modelo, name="modelo", signature=firma, input_example=X_prueba.head(),
+                                 skops_trusted_types=["sklearn.tree._tree.Tree"])
 
     print("Corrida:", corrida.info.run_name)
     print("Registros de entrenamiento:", len(X_entrenamiento))
