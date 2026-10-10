@@ -1,13 +1,18 @@
 # Entrenamiento y evaluación de un clasificador de fallas con el dataset AI4I 2020.
-# Viene del notebook de la semana 3; el preprocesamiento vive dentro del pipeline.
+# Viene del notebook de la semana 3; el preprocesamiento vive dentro del pipeline
+# y cada corrida queda registrada en MLflow con sus parámetros, métricas y artefactos.
 import argparse
 import json
 import os
+import tempfile
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import mlflow
+import mlflow.sklearn
 import pandas as pd
+from mlflow.models import infer_signature
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -33,7 +38,7 @@ COLUMNAS = {
 
 def leer_argumentos():
     parser = argparse.ArgumentParser(
-        description="Entrena un clasificador de fallas de máquina con el dataset AI4I 2020 y lo evalúa en prueba."
+        description="Entrena un clasificador de fallas de máquina con el dataset AI4I 2020, lo evalúa en prueba y registra la corrida en MLflow."
     )
     parser.add_argument("--modelo", choices=["regresion_logistica", "bosque_aleatorio"], default="regresion_logistica",
                         help="clasificador a entrenar (por defecto %(default)s)")
@@ -55,8 +60,12 @@ def leer_argumentos():
                         help="fracción de registros para prueba (por defecto %(default)s)")
     parser.add_argument("--datos", default="datos/ai4i2020.csv",
                         help="ruta del archivo csv (por defecto %(default)s)")
-    parser.add_argument("--salida", default="salidas",
-                        help="carpeta donde se guardan la matriz de confusión y las métricas (por defecto %(default)s)")
+    parser.add_argument("--experimento", default="experimentacion_mantenimiento_ai4i",
+                        help="nombre del experimento en MLflow (por defecto %(default)s)")
+    parser.add_argument("--nombre_corrida", default=None,
+                        help="nombre de la corrida en MLflow (por defecto lo asigna MLflow)")
+    parser.add_argument("--tracking_uri", default="http://127.0.0.1:5000",
+                        help="servidor de MLflow (por defecto %(default)s)")
     return parser.parse_args()
 
 
@@ -83,6 +92,14 @@ def dividir(datos, test_size, semilla):
     return train_test_split(X, y, test_size=test_size, stratify=y, random_state=semilla)
 
 
+def hiperparametros(args):
+    # solo los que usa el modelo elegido, para que la comparación entre corridas sea limpia
+    comunes = {"modelo": args.modelo, "class_weight": args.class_weight, "semilla": args.semilla, "test_size": args.test_size}
+    if args.modelo == "regresion_logistica":
+        return {**comunes, "C": args.C, "max_iter": args.max_iter}
+    return {**comunes, "n_estimators": args.n_estimators, "max_depth": args.max_depth or "sin_limite", "min_samples_leaf": args.min_samples_leaf}
+
+
 def construir_modelo(args):
     # escalado de las numéricas y one hot del tipo, siempre dentro del pipeline
     preprocesamiento = ColumnTransformer([
@@ -106,22 +123,18 @@ def construir_modelo(args):
 def evaluar(modelo, X, y):
     predicciones = modelo.predict(X)
     matriz = confusion_matrix(y, predicciones)
-    vn, fp, fn, vp = matriz.ravel()
     metricas = {
         "exactitud": accuracy_score(y, predicciones),
         "precision": precision_score(y, predicciones, zero_division=0),
         "recall": recall_score(y, predicciones),
         "f1": f1_score(y, predicciones, zero_division=0),
-        "verdaderos_negativos": int(vn),
-        "falsos_positivos": int(fp),
-        "falsos_negativos": int(fn),
-        "verdaderos_positivos": int(vp),
+        "falsos_positivos": int(matriz[0, 1]),
+        "falsos_negativos": int(matriz[1, 0]),
     }
     return metricas, matriz
 
 
 def guardar_artefactos(matriz, metricas, carpeta):
-    os.makedirs(carpeta, exist_ok=True)
     figura, eje = plt.subplots(figsize=(5, 4.5))
     ConfusionMatrixDisplay(matriz, display_labels=["Sin falla", "Falla"]).plot(ax=eje, cmap="Blues", colorbar=False, values_format="d")
     eje.set_title("Matriz de confusión en prueba")
@@ -133,7 +146,7 @@ def guardar_artefactos(matriz, metricas, carpeta):
     plt.close(figura)
     ruta_metricas = os.path.join(carpeta, "metricas.json")
     with open(ruta_metricas, "w", encoding="utf-8") as archivo:
-        json.dump(metricas, archivo, indent=2)
+        json.dump({**metricas, "matriz_confusion": matriz.tolist()}, archivo, indent=2)
     return [ruta_figura, ruta_metricas]
 
 
@@ -141,13 +154,31 @@ def main():
     args = leer_argumentos()
     datos = limpiar(cargar_datos(args.datos))
     X_entrenamiento, X_prueba, y_entrenamiento, y_prueba = dividir(datos, args.test_size, args.semilla)
+
+    mlflow.set_tracking_uri(args.tracking_uri)
+    mlflow.set_experiment(args.experimento)
+    with mlflow.start_run(run_name=args.nombre_corrida) as corrida:
+        for nombre, valor in hiperparametros(args).items():
+            mlflow.log_param(nombre, valor)
+        mlflow.log_param("registros_entrenamiento", len(X_entrenamiento))
+        mlflow.log_param("registros_prueba", len(X_prueba))
+
+        modelo = construir_modelo(args)
+        modelo.fit(X_entrenamiento, y_entrenamiento)
+        metricas, matriz = evaluar(modelo, X_prueba, y_prueba)
+        for nombre, valor in metricas.items():
+            mlflow.log_metric(nombre, valor)
+
+        # la figura y el json se escriben en una carpeta temporal y se suben como artefactos
+        with tempfile.TemporaryDirectory() as carpeta:
+            for ruta in guardar_artefactos(matriz, metricas, carpeta):
+                mlflow.log_artifact(ruta)
+        firma = infer_signature(X_prueba, modelo.predict(X_prueba))
+        mlflow.sklearn.log_model(modelo, name="modelo", signature=firma, input_example=X_prueba.head())
+
+    print("Corrida:", corrida.info.run_name)
     print("Registros de entrenamiento:", len(X_entrenamiento))
     print("Registros de prueba:", len(X_prueba))
-
-    modelo = construir_modelo(args)
-    modelo.fit(X_entrenamiento, y_entrenamiento)
-    metricas, matriz = evaluar(modelo, X_prueba, y_prueba)
-    guardar_artefactos(matriz, metricas, args.salida)
     for nombre in ["exactitud", "precision", "recall", "f1"]:
         print(f"{nombre}: {metricas[nombre]:.4f}")
     print("Falsos positivos:", metricas["falsos_positivos"])
