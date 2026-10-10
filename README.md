@@ -8,7 +8,7 @@ Script de entrenamiento parametrizado para el dataset AI4I 2020 de mantenimiento
 train.py             carga, limpieza, división, modelo, evaluación y registro en MLflow
 requirements.txt     dependencias con versiones fijas
 datos/ai4i2020.csv   dataset AI4I 2020
-notebooks/           notebook de exploración de la semana 3 (EDA, limpieza y modelo base)
+notebooks/           notebook de exploración de la semana 3 (EDA y limpieza)
 ```
 
 ## Instalación
@@ -23,15 +23,15 @@ pip install -r requirements.txt
 
 En Linux o macOS el entorno se activa con `source venv/bin/activate`.
 
-## Servidor de MLflow
+## Registro de MLflow
 
-En una terminal aparte, desde una carpeta fuera del repositorio (ahí se crean `mlruns/` y `mlartifacts/`):
+Por defecto cada corrida se registra en `mlflow.db` (SQLite) y sus artefactos en `mlruns/`, los dos dentro de la carpeta del repositorio, sin necesidad de levantar un servidor. Para verlas en la interfaz, desde la misma carpeta:
 
 ```
-mlflow server --host 127.0.0.1 --port 5000
+mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-La interfaz queda en http://127.0.0.1:5000.
+La interfaz queda en http://127.0.0.1:5000. Si se prefiere un servidor de tracking, se lanza en otra terminal `mlflow server --host 127.0.0.1 --port 5000` y se pasa `--tracking_uri http://127.0.0.1:5000` en cada corrida.
 
 ## Ejecución
 
@@ -63,7 +63,7 @@ python train.py --modelo bosque_aleatorio --max_depth 5 --nombre_corrida ba_prof
 | `--datos` | `datos/ai4i2020.csv` | ruta del csv |
 | `--experimento` | `experimentacion_mantenimiento_ai4i` | nombre del experimento en MLflow |
 | `--nombre_corrida` | lo asigna MLflow | nombre de la corrida |
-| `--tracking_uri` | `http://127.0.0.1:5000` | servidor de MLflow |
+| `--tracking_uri` | `sqlite:///mlflow.db` | almacén de MLflow: archivo SQLite local o servidor |
 
 Cada corrida registra en MLflow los hiperparámetros con `log_param`; las métricas en prueba `exactitud`, `precision`, `recall`, `f1`, `falsos_positivos` y `falsos_negativos` con `log_metric`; la matriz de confusión (`matriz_confusion.png`) y `metricas.json` con `log_artifact`; y el pipeline entrenado con `mlflow.sklearn.log_model`.
 

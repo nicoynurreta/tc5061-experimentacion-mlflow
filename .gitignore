@@ -1,6 +1,7 @@
 # salidas de MLflow y del script
 mlruns/
 mlartifacts/
+mlflow.db
 salidas/
 
 # python

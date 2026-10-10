@@ -64,8 +64,8 @@ def leer_argumentos():
                         help="nombre del experimento en MLflow (por defecto %(default)s)")
     parser.add_argument("--nombre_corrida", default=None,
                         help="nombre de la corrida en MLflow (por defecto lo asigna MLflow)")
-    parser.add_argument("--tracking_uri", default="http://127.0.0.1:5000",
-                        help="servidor de MLflow (por defecto %(default)s)")
+    parser.add_argument("--tracking_uri", default="sqlite:///mlflow.db",
+                        help="almacén de MLflow, archivo SQLite local o servidor (por defecto %(default)s)")
     return parser.parse_args()
 
 
